@@ -80,7 +80,7 @@ class ScriptArguments:
     )
     # Sequence length (i.e. context length)
     max_length: int = field(
-        default=2048,
+        default=1024,
         metadata={"help": "Maximum token length per example"},
     )
     # LoRA
@@ -102,7 +102,7 @@ class ScriptArguments:
     wandb_project: str = field(default="qwen3-openorca-sft", metadata={"help": "W&B project name"})
     wandb_run_name: Optional[str] = field(default=None, metadata={"help": "W&B run name"})
     # Output / checkpointing
-    output_dir: str = field(default="./runs/qwen3-openorca")
+    output_dir: str = field(default="./runs/qwen3-openorca-v2")
     resume_from_checkpoint: Optional[str] = field(
         default=None,
         metadata={"help": "Path to a checkpoint dir, or 'True' to auto-resume latest"},
@@ -198,7 +198,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
         quantization_config=bnb_config,
-        device_map="auto",
+        device_map=None, # Needs to be set to None for distributed training
         torch_dtype=compute_dtype if not args.use_4bit else None,
         trust_remote_code=True,
         attn_implementation="flash_attention_2" if torch.cuda.is_available() else "eager",
@@ -225,10 +225,10 @@ def main():
     # ── Training arguments ────────────────────────────────────────────────────
     training_args = SFTConfig(
         output_dir=args.output_dir,
-        num_train_epochs=1,
+        num_train_epochs=3,
 
         # Batch size & accumulation  ← tune to your GPU VRAM
-        per_device_train_batch_size=8,   # Number of training samples on a signle GPU per pass
+        per_device_train_batch_size=4,   # Number of training samples on a signle GPU per pass
         gradient_accumulation_steps=2,   # Number of mini-batches per gradient update
 
         # Sequence length (SFTConfig-specific)

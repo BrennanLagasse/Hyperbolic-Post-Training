@@ -1,0 +1,234 @@
+"""
+ARC-Challenge evaluation script using answer extraction (generation-based).
+
+Usage:
+    python eval_arc.py --model <model_name_or_path> [--sample 100] [--fewshot 5] [--device cuda]
+
+Example:
+    python eval_arc.py --model meta-llama/Llama-3.2-1B-Instruct --sample 100
+
+
+python ./eval/arc_eval.py --model ./runs/qwen3-openorca/final --sample 100
+python ./eval/arc_eval.py --model Qwen/Qwen3-1.7B --sample 100
+"""
+
+import re
+import argparse
+import random
+from dataclasses import dataclass
+from typing import Optional
+
+import torch
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from tqdm import tqdm
+
+
+# ---------------------------------------------------------------------------
+# Prompt construction
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT = (
+    "You are a helpful assistant answering multiple-choice science questions. "
+    "Always end your response with 'Answer: X' where X is the single letter of "
+    "the correct choice (A, B, C, or D)."
+)
+
+def format_question(example: dict) -> str:
+    """Format a single ARC example into a prompt string."""
+    question = example["question"]
+    choices = example["choices"]          # {"label": [...], "text": [...]}
+    labels = choices["label"]
+    texts  = choices["text"]
+
+    choice_str = "\n".join(
+        f"{label}. {text}" for label, text in zip(labels, texts)
+    )
+    return f"Question: {question}\n{choice_str}\n"
+
+
+def build_fewshot_prompt(fewshot_examples: list[dict], test_example: dict) -> str:
+    """
+    Build a full prompt with k few-shot examples followed by the test question.
+    Each few-shot example shows the answer so the model learns the format.
+    """
+    prompt = SYSTEM_PROMPT + "\n\n"
+    for ex in fewshot_examples:
+        prompt += format_question(ex)
+        prompt += f"Answer: {ex['answerKey']}\n\n"
+    prompt += format_question(test_example)
+    # Leave the answer prefix for the model to complete
+    prompt += "Answer:"
+    return prompt
+
+
+# ---------------------------------------------------------------------------
+# Answer extraction
+# ---------------------------------------------------------------------------
+
+def extract_answer(response: str) -> Optional[str]:
+    """
+    Extract the predicted answer letter from the model's response.
+    Tries several patterns in order of specificity.
+    """
+    # Pattern 1: explicit "Answer: X" (our prompted format)
+    match = re.search(r"Answer:\s*([A-Da-d])", response)
+    if match:
+        return match.group(1).upper()
+
+    # Pattern 2: standalone letter on its own line, e.g. "\nA\n"
+    match = re.search(r"^\s*([A-Da-d])\s*$", response, re.MULTILINE)
+    if match:
+        return match.group(1).upper()
+
+    # Pattern 3: letter followed by period or parenthesis, e.g. "A." or "(A)"
+    match = re.search(r"\b([A-Da-d])[.)]", response)
+    if match:
+        return match.group(1).upper()
+
+    return None  # failed to extract
+
+
+# ---------------------------------------------------------------------------
+# Generation
+# ---------------------------------------------------------------------------
+
+@torch.inference_mode()
+def generate_answer(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    prompt: str,
+    max_new_tokens: int = 16,
+    device: str = "cuda",
+) -> str:
+    """Run greedy decoding and return only the newly generated tokens as text."""
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    input_len = inputs["input_ids"].shape[1]
+
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
+        do_sample=False,       # greedy — deterministic and sufficient for extraction
+        pad_token_id=tokenizer.eos_token_id,
+    )
+
+    new_tokens = outputs[0][input_len:]
+    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+
+# ---------------------------------------------------------------------------
+# Main evaluation loop
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EvalResult:
+    total: int
+    correct: int
+    failed_extraction: int
+
+    @property
+    def accuracy(self) -> float:
+        return self.correct / self.total if self.total > 0 else 0.0
+
+    def __str__(self) -> str:
+        return (
+            f"Accuracy:            {self.accuracy:.2%}  ({self.correct}/{self.total})\n"
+            f"Extraction failures: {self.failed_extraction}/{self.total}"
+        )
+
+
+def evaluate(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    sample_size: int = 100,
+    num_fewshot: int = 5,
+    seed: int = 42,
+    device: str = "cuda",
+    verbose: bool = False,
+) -> EvalResult:
+    random.seed(seed)
+
+    dataset = load_dataset("allenai/ai2_arc", "ARC-Challenge")
+    train_split = list(dataset["train"])
+    test_split  = list(dataset["test"])
+
+    # Sample test examples
+    sample = random.sample(test_split, min(sample_size, len(test_split)))
+
+    correct = 0
+    failed = 0
+
+    for example in tqdm(sample, desc="Evaluating"):
+        # Draw few-shot examples from train (exclude current question by id)
+        fewshot_pool = [e for e in train_split if e["id"] != example["id"]]
+        fewshot_examples = random.sample(fewshot_pool, min(num_fewshot, len(fewshot_pool)))
+
+        prompt = build_fewshot_prompt(fewshot_examples, example)
+        response = generate_answer(model, tokenizer, prompt, device=device)
+        predicted = extract_answer(response)
+
+        gold = example["answerKey"].strip().upper()
+
+        if predicted is None:
+            failed += 1
+            if verbose:
+                print(f"[EXTRACTION FAILED] response='{response}' gold={gold}")
+        elif predicted == gold:
+            correct += 1
+            if verbose:
+                print(f"[CORRECT] predicted={predicted} gold={gold}")
+        else:
+            if verbose:
+                print(f"[WRONG]   predicted={predicted} gold={gold} response='{response}'")
+
+    return EvalResult(total=len(sample), correct=correct, failed_extraction=failed)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate a causal LM on ARC-Challenge.")
+    parser.add_argument("--model",    type=str, required=True,  help="HuggingFace model name or local path")
+    parser.add_argument("--sample",   type=int, default=100,    help="Number of test questions to evaluate on")
+    parser.add_argument("--fewshot",  type=int, default=5,      help="Number of few-shot examples per question")
+    parser.add_argument("--device",   type=str, default="cuda", help="Device: 'cuda', 'cpu', or 'mps'")
+    parser.add_argument("--seed",     type=int, default=42,     help="Random seed")
+    parser.add_argument("--verbose",  action="store_true",      help="Print per-example predictions")
+    parser.add_argument("--dtype",    type=str, default="auto", help="Model dtype: 'auto', 'float16', 'bfloat16'")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    print(f"Loading model: {args.model}")
+    dtype_map = {"float16": torch.float16, "bfloat16": torch.bfloat16, "auto": "auto"}
+    torch_dtype = dtype_map.get(args.dtype, "auto")
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model,
+        torch_dtype=torch_dtype,
+        device_map=args.device,
+    )
+    model.eval()
+
+    print(f"Evaluating on {args.sample} ARC-Challenge examples with {args.fewshot}-shot prompting...\n")
+    result = evaluate(
+        model=model,
+        tokenizer=tokenizer,
+        sample_size=args.sample,
+        num_fewshot=args.fewshot,
+        seed=args.seed,
+        device=args.device,
+        verbose=args.verbose,
+    )
+
+    print("\n=== Results ===")
+    print(result)
+
+
+if __name__ == "__main__":
+    main()
