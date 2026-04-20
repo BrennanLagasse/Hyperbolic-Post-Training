@@ -23,6 +23,8 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 
+from eval_utiles import generate_answer
+
 
 # ---------------------------------------------------------------------------
 # Prompt construction
@@ -88,34 +90,6 @@ def extract_answer(response: str) -> Optional[str]:
 
     return None  # failed to extract
 
-
-# ---------------------------------------------------------------------------
-# Generation
-# ---------------------------------------------------------------------------
-
-@torch.inference_mode()
-def generate_answer(
-    model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
-    prompt: str,
-    max_new_tokens: int = 16,
-    device: str = "cuda",
-) -> str:
-    """Run greedy decoding and return only the newly generated tokens as text."""
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    input_len = inputs["input_ids"].shape[1]
-
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=max_new_tokens,
-        do_sample=False,       # greedy — deterministic and sufficient for extraction
-        pad_token_id=tokenizer.eos_token_id,
-    )
-
-    new_tokens = outputs[0][input_len:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-
-
 # ---------------------------------------------------------------------------
 # Main evaluation loop
 # ---------------------------------------------------------------------------
@@ -164,7 +138,7 @@ def evaluate(
         fewshot_examples = random.sample(fewshot_pool, min(num_fewshot, len(fewshot_pool)))
 
         prompt = build_fewshot_prompt(fewshot_examples, example)
-        response = generate_answer(model, tokenizer, prompt, device=device)
+        response = generate_answer(model, tokenizer, prompt, device=device, max_new_tokens=32)
         predicted = extract_answer(response)
 
         gold = example["answerKey"].strip().upper()

@@ -9,9 +9,6 @@ Features:
   - Gradient checkpointing
   - Configurable via dataclass or CLI overrides
 
-Requirements:
-  pip install transformers trl peft accelerate bitsandbytes datasets wandb
-
 Usage:
   # Full run
   python train_qwen3_openorca.py
