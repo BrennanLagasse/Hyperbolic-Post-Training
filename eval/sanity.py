@@ -12,6 +12,8 @@ from typing import Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from models.hybrid_qwen import HyperbolicQwen
+
 
 # ---------------------------------------------------------------------------
 # Prompt construction
@@ -112,6 +114,7 @@ def generate_answer(
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a causal LM on ARC-Challenge.")
     parser.add_argument("--model",    type=str, required=True,  help="HuggingFace model name or local path")
+    parser.add_argument("--tokenizer",type=str, default=None,   help="Huggingface model name (if shared by model), defaults to model")
     parser.add_argument("--sample",   type=int, default=100,    help="Number of test questions to evaluate on")
     parser.add_argument("--fewshot",  type=int, default=5,      help="Number of few-shot examples per question")
     parser.add_argument("--device",   type=str, default="cuda", help="Device: 'cuda', 'cpu', or 'mps'")
@@ -124,11 +127,17 @@ def parse_args():
 def main():
     args = parse_args()
 
-    print(f"Loading model: {args.model}")
+    print(f"Loading model: {args.model} with device {args.device}")
     dtype_map = {"float16": torch.float16, "bfloat16": torch.bfloat16, "auto": "auto"}
     torch_dtype = dtype_map.get(args.dtype, "auto")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    if args.tokenizer is None:
+        tokenizer_path = args.model
+    else:
+        tokenizer_path = args.tokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
         torch_dtype=torch_dtype,
@@ -136,12 +145,16 @@ def main():
     )
     model.eval()
 
-    prompt = "What is 7+8? Please answer succintly:"
+    # prompt = "What is 7+8? Please answer succintly:"
+    prompt = "What color is the sky?"
 
-    response = generate_answer(model, tokenizer, prompt, max_new_tokens=64)
+    response = generate_answer(model, tokenizer, prompt, max_new_tokens=64, device=args.device)
 
-    print("\n=== Results ===")
+    print("\n=== Prompt ===")
+    print(prompt)
+    print("\n=== Response ===")
     print(response)
+    print()
 
 
 if __name__ == "__main__":

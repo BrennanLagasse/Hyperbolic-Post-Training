@@ -29,14 +29,32 @@ from transformers import (
 )
 
 from transformers.models.qwen3.configuration_qwen3 import Qwen3Config
+from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
 
 import torch.nn.functional as F
 
 from geoopt.manifolds import Lorentz
 
-def lorentz_inner(x, y):
-    """ Compute lorentz inner product between x and y of shape [b, d+1] """
-    return -x[..., 0] * y[..., 0] + (x[..., 1:] * y[..., 1:]).sum(dim=-1)
+from transformers.modeling_outputs import CausalLMOutputWithPast
+
+# def lorentz_inner(x, y):
+#     """ Compute lorentz inner product between x and y of shape [b, d+1] """
+#     return -x[..., 0] * y[..., 0] + (x[..., 1:] * y[..., 1:]).sum(dim=-1)
+
+def lorentz_inner(x, w):
+    """
+    x: [b, l, d+1]
+    w: [v, d+1]
+
+    returns: [b, l, v]
+    """
+
+    # Just reverse sign of one time component then compute as matmul
+
+    x_sign = x.clone()
+    x_sign[..., 0] = -x_sign[..., 0]
+
+    return x_sign @ w.T
 
 class HyperbolicQwenConfig(Qwen3Config):
     model_type = "hyperbolic_qwen"
@@ -56,6 +74,7 @@ class HyperbolicQwenConfig(Qwen3Config):
 
         self.base_model_name = base_model_name
         self.k = k
+        self.tie_word_embeddings=False
 
 class HyperbolicProjection(nn.Module):
     """ 
@@ -80,23 +99,23 @@ class HyperbolicProjection(nn.Module):
         Compute exp_p(x) where p = (1/\sqrt{k}, 0, ..., 0)
 
         Params:
-            x: tensor of shape [b, d] (in \R^n)
+            x: tensor of shape [..., d] (in \R^n)
         
         Returns:
-            x_hyp: tensor of shape [b, d+1] (in \H^n_k)
+            x_hyp: tensor of shape [..., d+1] (in \H^n_k)
         """
 
-        b, d = x.shape
+        *batch_dims, d = x.shape
         device = x.device
         dtype = x.dtype
 
         # Origin of the hyperboloid, p = (1/sqrt(k), 0, ..., 0)
-        p = torch.zeros(size=(b, d+1), device=device, dtype=dtype)
-        p[0] = 1 / (self.hyp.k ** 0.5)
+        p = torch.zeros(size=(*batch_dims, d+1), device=device, dtype=dtype)
+        p[..., 0] = 1 / (self.hyp.k ** 0.5)
 
         # Convert x to a derivative in ambient space at p by prepending a zero
-        zeros = torch.zeros(size=(b, 1), device=device, dtype=dtype)
-        x_amb = torch.cat((zeros, x), dim=1)
+        zeros = torch.zeros(size=(*batch_dims, 1), device=device, dtype=dtype)
+        x_amb = torch.cat((zeros, x), dim=-1)
 
         # Apply exponential map
         x_hyp = self.hyp.expmap(p, x_amb)
@@ -113,30 +132,40 @@ class HyperbolicLMHead(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.weights = nn.Parameter(torch.randn(config.vocab_size, config.hidden_size))
+        self.weight = nn.Parameter(torch.randn(config.vocab_size, config.hidden_size, dtype=torch.bfloat16))
         self.hyp_proj = HyperbolicProjection(config.k)
 
     def forward(self, x):
         """
         Compute logit_k = <exp_p(x), exp_p(w_k)>_L
+
+        where x_final is the embedding of the last token in x
+
+        Params:
+            x: [batch, len, emb_dim] or [batch, 1, emb_dim]
+
+        Returns:
+            logits: [batch, alphabet_size]
         """
 
         x_hyp = self.hyp_proj(x)
-        weights_hyp = self.hyp_proj(self.weights)
 
-        logits = lorentz_inner(x_hyp + weights_hyp)
+        weight_hyp = self.hyp_proj(self.weight)
+
+        logits = lorentz_inner(x_hyp, weight_hyp)
 
         return logits
 
-    def initialize_from_linear(self, linear_weights):
+    def initialize_from_linear(self, linear_weight):
         with torch.no_grad():
-            self.weights.copy_(linear_weights)
+            self.weight.copy_(linear_weight)
         
-class HyperbolicQwen(PreTrainedModel):
+class HyperbolicQwen(Qwen3ForCausalLM):
     """ Qwen with hyperbolic projection head """
 
     config_class = HyperbolicQwenConfig
     all_tied_weights_keys = []
+    tie_word_embeddings = False
 
     def __init__(self, config):
         super().__init__(config)
@@ -155,6 +184,7 @@ class HyperbolicQwen(PreTrainedModel):
         input_ids=None,
         attention_mask=None,
         labels=None,
+        past_key_values=None,
         **kwargs
     ):
 
@@ -178,22 +208,13 @@ class HyperbolicQwen(PreTrainedModel):
                 ignore_index=-100
             )
 
-        return {
-            "loss": loss,
-            "logits": logits,
-            "hidden_states": hidden_states,
-        }
-
-    # def initialize_from_pretrained(self):
-    #     """ Load weights from base qwen model once """
-
-    #     base_model = AutoModel.from_pretrained(self.config.base_model_name)
-    #     self.backbone.load_state_dict(base_model.state_dict())
-
-    #     base_lm = AutoModelForCausalLM.from_pretrained(self.config.base_model_name)
-    #     original_head_weights = base_lm.lm_head.weight.data
-
-    #     self.lm_head.initialize_from_linear(original_head_weights)
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
 
     def initialize_from_pretrained(self):
         """ Load weights from base qwen model once """
@@ -208,3 +229,16 @@ class HyperbolicQwen(PreTrainedModel):
         # Initialize projection head based on original projection head
         original_head_weights = base_lm.lm_head.weight.data
         self.lm_head.initialize_from_linear(original_head_weights)
+
+# Initialize the models
+print("Registering HyperbolicQwen")
+
+AutoConfig.register(
+    "hyperbolic_qwen", 
+    HyperbolicQwenConfig
+)
+
+AutoModelForCausalLM.register(
+    HyperbolicQwenConfig, 
+    HyperbolicQwen
+)

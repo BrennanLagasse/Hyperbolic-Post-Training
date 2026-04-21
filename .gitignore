@@ -1,4 +1,6 @@
 /wandb/
 /logs/
 /archive/
+
+# Too large
 models/hyperbolic-qwen/model.safetensors
