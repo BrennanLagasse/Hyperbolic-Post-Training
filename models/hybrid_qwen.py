@@ -21,11 +21,41 @@ Euclidean head (see the small-norm analysis in the derivation).
 import torch
 import torch.nn as nn
 
-from transformers import PreTrainedModel, AutoModel
+from transformers import (
+    PreTrainedModel, 
+    AutoModel, 
+    AutoModelForCausalLM,
+    AutoConfig,
+)
+
+from transformers.models.qwen3.configuration_qwen3 import Qwen3Config
+
 import torch.nn.functional as F
 
 from geoopt.manifolds import Lorentz
 
+def lorentz_inner(x, y):
+    """ Compute lorentz inner product between x and y of shape [b, d+1] """
+    return -x[..., 0] * y[..., 0] + (x[..., 1:] * y[..., 1:]).sum(dim=-1)
+
+class HyperbolicQwenConfig(Qwen3Config):
+    model_type = "hyperbolic_qwen"
+
+    def __init__(
+        self,
+        base_model_name="Qwen/Qwen3-1.7B",
+        k=1.0,
+        **kwargs
+    ):
+        """
+        Args:
+            base_model_name (str): name of base model on Huggingface
+            k (float): negative curvature of the hyperbolic embedding space
+        """
+        super().__init__(**kwargs)
+
+        self.base_model_name = base_model_name
+        self.k = k
 
 class HyperbolicProjection(nn.Module):
     """ 
@@ -33,7 +63,7 @@ class HyperbolicProjection(nn.Module):
     to d-dim hyperboloid embedded in d+1 dimensional space
     """
 
-    def __init__(self, dim, k=1.0):
+    def __init__(self, k=1.0):
         """ 
         Params:
             dim (int) - dimension of the ambient space
@@ -73,32 +103,52 @@ class HyperbolicProjection(nn.Module):
 
         return x_hyp
 
-class HyperbolicQwen3(PreTrainedModel):
+class HyperbolicLMHead(nn.Module):
+    """ 
+    Implementation of hyperbolic LM head where weights and latent states
+    are both stored in ambient space, projected to hyperboloid, and then
+    logit scores are computed based on similarity
+    """
+
+    def __init__(self, config):
+        super().__init__()
+
+        self.weights = nn.Parameter(torch.randn(config.vocab_size, config.hidden_size))
+        self.hyp_proj = HyperbolicProjection(config.k)
+
+    def forward(self, x):
+        """
+        Compute logit_k = <exp_p(x), exp_p(w_k)>_L
+        """
+
+        x_hyp = self.hyp_proj(x)
+        weights_hyp = self.hyp_proj(self.weights)
+
+        logits = lorentz_inner(x_hyp + weights_hyp)
+
+        return logits
+
+    def initialize_from_linear(self, linear_weights):
+        with torch.no_grad():
+            self.weights.copy_(linear_weights)
+        
+class HyperbolicQwen(PreTrainedModel):
+    """ Qwen with hyperbolic projection head """
+
     config_class = HyperbolicQwenConfig
+    all_tied_weights_keys = []
 
     def __init__(self, config):
         super().__init__(config)
 
         # Load in model without final prediction head (AutoModel vs AutoModelForCausalLM)
-        self.backbone = AutoModel.from_pretrained(
-            config.base_model_name
-        )
+        base_config = AutoConfig.from_pretrained(config.base_model_name)
+        self.backbone = AutoModel.from_config(base_config)
 
-        hidden_size = self.backbone.config.hidden_size
-        vocab_size = self.backbone.config.vocab_size
+        # LM Head (ambient embedding --> hyperbolic space --> alphabet)
+        self.lm_head = HyperbolicLMHead(config)
 
-        # Hyperbolic projection
-        self.hyperbolic = HyperbolicProjection(
-            dim=hidden_size,
-            c=config.curvature
-        )
-
-        # Custom LM head
-        self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False)
-
-        # Optional: tie weights
-        if config.tie_word_embeddings:
-            self.lm_head.weight = self.backbone.embed_tokens.weight
+        self.config = config
 
     def forward(
         self,
@@ -107,6 +157,8 @@ class HyperbolicQwen3(PreTrainedModel):
         labels=None,
         **kwargs
     ):
+
+        # Compute hidden states
         outputs = self.backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -115,9 +167,7 @@ class HyperbolicQwen3(PreTrainedModel):
 
         hidden_states = outputs.last_hidden_state
 
-        if self.config.project_hidden:
-            hidden_states = self.hyperbolic(hidden_states)
-
+        # Project into hyperbolic space and eval
         logits = self.lm_head(hidden_states)
 
         loss = None
@@ -133,3 +183,28 @@ class HyperbolicQwen3(PreTrainedModel):
             "logits": logits,
             "hidden_states": hidden_states,
         }
+
+    # def initialize_from_pretrained(self):
+    #     """ Load weights from base qwen model once """
+
+    #     base_model = AutoModel.from_pretrained(self.config.base_model_name)
+    #     self.backbone.load_state_dict(base_model.state_dict())
+
+    #     base_lm = AutoModelForCausalLM.from_pretrained(self.config.base_model_name)
+    #     original_head_weights = base_lm.lm_head.weight.data
+
+    #     self.lm_head.initialize_from_linear(original_head_weights)
+
+    def initialize_from_pretrained(self):
+        """ Load weights from base qwen model once """
+
+        print("New Initialization")
+
+        base_lm = AutoModelForCausalLM.from_pretrained(self.config.base_model_name)
+
+        # Load the base weights without the projection head
+        self.backbone.load_state_dict(base_lm.model.state_dict())
+
+        # Initialize projection head based on original projection head
+        original_head_weights = base_lm.lm_head.weight.data
+        self.lm_head.initialize_from_linear(original_head_weights)

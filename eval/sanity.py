@@ -7,14 +7,10 @@ python ./eval/sanity.py --model=./runs/qwen3-openorca/final
 
 import re
 import argparse
-import random
-from dataclasses import dataclass
 from typing import Optional
 
 import torch
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from tqdm import tqdm
 
 
 # ---------------------------------------------------------------------------
