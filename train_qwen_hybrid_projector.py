@@ -255,8 +255,8 @@ def main():
         num_train_epochs=3,
 
         # Batch size & accumulation  ← tune to your GPU VRAM
-        per_device_train_batch_size=parser.per_device_train_batch_size,
-        gradient_accumulation_steps=parser.gradient_accumulation_steps,   # effective batch = 4 * 4 * 2 GPUs = 32
+        per_device_train_batch_size = args.per_device_train_batch_size,
+        gradient_accumulation_steps = args.gradient_accumulation_steps,   # effective batch = 4 * 4 * 2 GPUs = 32
 
         # Memory
         gradient_checkpointing=True,
