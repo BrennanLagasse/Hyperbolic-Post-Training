@@ -216,7 +216,7 @@ def main():
     logger.info(f"\n\nDataset size: {len(raw_dataset):,}")
 
     # ── Tokenizer ─────────────────────────────────────────────────────────────
-    logger.info(f"\n\nTokenizing Dataset")
+    logger.info("\n\nTokenizing Dataset")
     tokenizer = AutoTokenizer.from_pretrained(
         args.tokenizer_name, trust_remote_code=True, padding_side="right"
     )
@@ -272,7 +272,7 @@ def main():
 
         # Checkpointing: saves every 500 steps; keeps last 3
         save_strategy="steps",
-        save_steps=500,
+        save_steps=100,
         save_total_limit=3,
 
         seed=args.seed,

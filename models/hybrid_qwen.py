@@ -21,8 +21,7 @@ Euclidean head (see the small-norm analysis in the derivation).
 import torch
 import torch.nn as nn
 
-from transformers import (
-    PreTrainedModel, 
+from transformers import ( 
     AutoModel, 
     AutoModelForCausalLM,
     AutoConfig,
@@ -39,24 +38,32 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 
 import math
 
-# def lorentz_inner(x, y):
-#     """ Compute lorentz inner product between x and y of shape [b, d+1] """
-#     return -x[..., 0] * y[..., 0] + (x[..., 1:] * y[..., 1:]).sum(dim=-1)
-
 def lorentz_inner(x, w):
     """
-    x: [b, l, d+1]
-    w: [v, d+1]
-
-    returns: [b, l, v]
+    Compute Lorentz inner product <x, w>_L = -x0*w0 + x1*w1 + ... + xd*wd
+    
+    Args:
+        x: [..., d+1] points on hyperboloid (batch)
+        w: [vocab_size, d+1] projected weight vectors
+    
+    Returns:
+        logits: [..., vocab_size]
     """
-
-    # Just reverse sign of one time component then compute as matmul
-
-    x_sign = x.clone()
-    x_sign[..., 0] = -x_sign[..., 0]
-
-    return x_sign @ w.T
+    # Ensure w is on same device and dtype as x
+    w = w.to(device=x.device, dtype=x.dtype)
+    
+    # Split time and spatial components
+    x_time = x[..., :1]        # [..., 1]
+    x_space = x[..., 1:]       # [..., d]
+    
+    w_time = w[:, :1]          # [vocab, 1]
+    w_space = w[:, 1:]         # [vocab, d]
+    
+    # Lorentz inner: -<time components> + <spatial components>
+    time_term = x_time @ w_time.T      # [..., vocab]
+    space_term = x_space @ w_space.T   # [..., vocab]
+    
+    return -time_term + space_term
 
 class HyperbolicQwenConfig(Qwen3Config):
     model_type = "hybrid_qwen"
@@ -94,6 +101,7 @@ class HyperbolicProjection(nn.Module):
 
         assert k > 0, "Curvature of a hyperboloid is negative and k is the negative curvature, so it should be positive"
 
+        self.k = k
         self.hyp = Lorentz(k=k)
 
     def forward(self, x):
@@ -113,7 +121,7 @@ class HyperbolicProjection(nn.Module):
 
         # Origin of the hyperboloid, p = (1/sqrt(k), 0, ..., 0)
         p = torch.zeros(size=(*batch_dims, d+1), device=device, dtype=dtype)
-        p[..., 0] = 1 / (self.hyp.k ** 0.5)
+        p[..., 0] = 1 / (self.k ** 0.5)
 
         # Convert x to a derivative in ambient space at p by prepending a zero
         zeros = torch.zeros(size=(*batch_dims, 1), device=device, dtype=dtype)
@@ -136,6 +144,10 @@ class HyperbolicLMHead(nn.Module):
 
         self.weight = nn.Parameter(torch.randn(config.vocab_size, config.hidden_size, dtype=torch.bfloat16))
         self.hyp_proj = HyperbolicProjection(config.k)
+        
+        # Cache for projected weights
+        self._weight_hyp_cache = None
+        self._weight_hash = None
 
     def forward(self, x):
         """
@@ -155,29 +167,26 @@ class HyperbolicLMHead(nn.Module):
 
         x_hyp = self.hyp_proj(x)
 
-        weight_hyp = self.hyp_proj(self.weight)
+        weight_hyp = self._get_weight_hyp()
 
         logits = lorentz_inner(x_hyp, weight_hyp)
 
-        # print(f"x: {x}")
-        # print(f"w: {self.weight}")
-
-        # print(f"fwd: {logits}")
-
-        # print(f"TX: {x.norm(dim=-1, keepdim=False)}")
-        # print(f"TW: {self.weight.norm(dim=-1, keepdim=False)}")
-        # print(f"HX: {x_hyp.norm(dim=-1, keepdim=False)}")
-        # print(f"HW: {weight_hyp.norm(dim=-1, keepdim=False)}")
-
         return logits
 
-    # def save_pretrained(self, path):
-    #     self.model.save_pretrained(path)
+    def _get_weight_hyp(self):
+        """Return cached projected weights, recomputing only if weights have changed."""
 
-    # @classmethod
-    # def from_pretrained(cls, model_name: str, compute_dtype=torch.bfloat16):
-    #     instance = cls(model_name, compute_dtype)
-    #     return instance
+        # During training recompute projection of weights every step since they are updated
+        if self.training:
+            return self.hyp_proj(self.weight)
+        
+        # During inference, cache 
+        current_hash = self.weight.data_ptr()
+        if self._weight_hyp_cache is None or current_hash != self._weight_hash:
+            self._weight_hyp_cache = self.hyp_proj(self.weight)
+            self._weight_hash = current_hash
+        
+        return self._weight_hyp_cache
 
     def initialize_from_linear(self, linear_weight):
         with torch.no_grad():

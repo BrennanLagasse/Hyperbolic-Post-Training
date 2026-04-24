@@ -4,7 +4,7 @@ Register the HybridQwen model for loading at later points
 
 from hybrid_qwen import HyperbolicQwen, HyperbolicQwenConfig
 
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer
 
 # Initialize new config with the same values as the pretrained model up to architecture changes
 base_config = AutoConfig.from_pretrained("Qwen/Qwen3-1.7B")
