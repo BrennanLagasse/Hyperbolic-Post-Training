@@ -37,6 +37,8 @@ from geoopt.manifolds import Lorentz
 
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
+import math
+
 # def lorentz_inner(x, y):
 #     """ Compute lorentz inner product between x and y of shape [b, d+1] """
 #     return -x[..., 0] * y[..., 0] + (x[..., 1:] * y[..., 1:]).sum(dim=-1)
@@ -57,7 +59,7 @@ def lorentz_inner(x, w):
     return x_sign @ w.T
 
 class HyperbolicQwenConfig(Qwen3Config):
-    model_type = "hyperbolic_qwen"
+    model_type = "hybrid_qwen"
 
     def __init__(
         self,
@@ -148,13 +150,34 @@ class HyperbolicLMHead(nn.Module):
             logits: [batch, alphabet_size]
         """
 
+        # Normalize to avoid exponential scaleup
+        x = x / math.sqrt(x.shape[-1])
+
         x_hyp = self.hyp_proj(x)
 
         weight_hyp = self.hyp_proj(self.weight)
 
         logits = lorentz_inner(x_hyp, weight_hyp)
 
+        print(f"x: {x}")
+        print(f"w: {self.weight}")
+
+        print(f"fwd: {logits}")
+
+        print(f"TX: {x.norm(dim=-1, keepdim=False)}")
+        print(f"TW: {self.weight.norm(dim=-1, keepdim=False)}")
+        print(f"HX: {x_hyp.norm(dim=-1, keepdim=False)}")
+        print(f"HW: {weight_hyp.norm(dim=-1, keepdim=False)}")
+
         return logits
+
+    # def save_pretrained(self, path):
+    #     self.model.save_pretrained(path)
+
+    # @classmethod
+    # def from_pretrained(cls, model_name: str, compute_dtype=torch.bfloat16):
+    #     instance = cls(model_name, compute_dtype)
+    #     return instance
 
     def initialize_from_linear(self, linear_weight):
         with torch.no_grad():
@@ -208,6 +231,10 @@ class HyperbolicQwen(Qwen3ForCausalLM):
                 ignore_index=-100
             )
 
+        print(f"labels: {labels}")
+        print(f"logits: {logits}")
+        print(f"loss: {loss}")
+
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
@@ -230,11 +257,13 @@ class HyperbolicQwen(Qwen3ForCausalLM):
         original_head_weights = base_lm.lm_head.weight.data
         self.lm_head.initialize_from_linear(original_head_weights)
 
+        print(self.lm_head.weight)
+
 # Initialize the models
 print("Registering HyperbolicQwen")
 
 AutoConfig.register(
-    "hyperbolic_qwen", 
+    "hybrid_qwen", 
     HyperbolicQwenConfig
 )
 

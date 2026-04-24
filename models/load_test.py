@@ -4,7 +4,7 @@ Register the HybridQwen model for loading at later points
 
 from hybrid_qwen import HyperbolicQwen, HyperbolicQwenConfig
 
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 # Initialize new config with the same values as the pretrained model up to architecture changes
 base_config = AutoConfig.from_pretrained("Qwen/Qwen3-1.7B")
@@ -17,29 +17,12 @@ print("Model initialized.")
 print("\nLoading model weights...")
 model.initialize_from_pretrained()
 
-print("\nRegistering config...")
-AutoConfig.register(
-    "hybrid_qwen",
-    HyperbolicQwenConfig
-)
+print("\nSanity forward pass")
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-1.7B")
+prompt = "The sky is blue because"
+inputs = tokenizer(prompt, return_tensors="pt")
+out = model(inputs)
 
-print("\nRegistering model...")
-AutoModelForCausalLM.register(
-    HyperbolicQwenConfig,
-    HyperbolicQwen
-)
 
-path = "hybrid_qwen"
-
-print("\nSaving model...")
-model.save_pretrained(path)
-
-print("\nLoading model...")
-model_new = AutoModelForCausalLM.from_pretrained(path)
-
-print("Old model")
-print(model.lm_head.weight)
-print("New Model")
-print(model_new.lm_head.weight)
 
 print("\nDone!")

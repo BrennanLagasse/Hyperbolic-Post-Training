@@ -121,6 +121,7 @@ def parse_args():
     parser.add_argument("--seed",     type=int, default=42,     help="Random seed")
     parser.add_argument("--verbose",  action="store_true",      help="Print per-example predictions")
     parser.add_argument("--dtype",    type=str, default="auto", help="Model dtype: 'auto', 'float16', 'bfloat16'")
+    parser.add_argument("--max_new_tokens", type=int, default=64, help="Number of tokens to generate")
     return parser.parse_args()
 
 
@@ -148,7 +149,7 @@ def main():
     # prompt = "What is 7+8? Please answer succintly:"
     prompt = "What color is the sky?"
 
-    response = generate_answer(model, tokenizer, prompt, max_new_tokens=64, device=args.device)
+    response = generate_answer(model, tokenizer, prompt, max_new_tokens=args.max_new_tokens, device=args.device)
 
     print("\n=== Prompt ===")
     print(prompt)
