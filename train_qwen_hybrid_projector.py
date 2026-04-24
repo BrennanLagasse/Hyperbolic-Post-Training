@@ -86,6 +86,15 @@ class ScriptArguments:
         default=512,
         metadata={"help": "Maximum token length per example"},
     )
+    # Train batch size
+    per_device_train_batch_size: int = field(
+        default=8,
+        metadata={"help": "Batch size of model"}
+    )
+    gradient_accumulation_steps: int = field(
+        default=4,
+        metadata={"help": "Number of iterations before gradient updates"}
+    )
     # W&B
     wandb_project: str = field(
         default="hyperbolic-head-openwebtext",
@@ -246,8 +255,8 @@ def main():
         num_train_epochs=3,
 
         # Batch size & accumulation  ← tune to your GPU VRAM
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=16,   # effective batch = 4 * 4 * 2 GPUs = 32
+        per_device_train_batch_size=parser.per_device_train_batch_size,
+        gradient_accumulation_steps=parser.gradient_accumulation_steps,   # effective batch = 4 * 4 * 2 GPUs = 32
 
         # Memory
         gradient_checkpointing=True,
