@@ -275,7 +275,9 @@ def main():
         args=training_args,
         train_dataset=tokenized_dataset,
         data_collator=data_collator,
-        # tokenizer=tokenizer,
+
+        # Working to resolve potential trainer issue
+        ddp_find_unused_parameters=True,
     )
 
     # ── Train (with optional resume) ──────────────────────────────────────────

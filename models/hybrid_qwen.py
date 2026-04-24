@@ -150,7 +150,7 @@ class HyperbolicLMHead(nn.Module):
             logits: [batch, alphabet_size]
         """
 
-        # Normalize to avoid exponential scaleup
+        # Normalize to avoid exponential 
         x = x / math.sqrt(x.shape[-1])
 
         x_hyp = self.hyp_proj(x)
@@ -159,15 +159,15 @@ class HyperbolicLMHead(nn.Module):
 
         logits = lorentz_inner(x_hyp, weight_hyp)
 
-        print(f"x: {x}")
-        print(f"w: {self.weight}")
+        # print(f"x: {x}")
+        # print(f"w: {self.weight}")
 
-        print(f"fwd: {logits}")
+        # print(f"fwd: {logits}")
 
-        print(f"TX: {x.norm(dim=-1, keepdim=False)}")
-        print(f"TW: {self.weight.norm(dim=-1, keepdim=False)}")
-        print(f"HX: {x_hyp.norm(dim=-1, keepdim=False)}")
-        print(f"HW: {weight_hyp.norm(dim=-1, keepdim=False)}")
+        # print(f"TX: {x.norm(dim=-1, keepdim=False)}")
+        # print(f"TW: {self.weight.norm(dim=-1, keepdim=False)}")
+        # print(f"HX: {x_hyp.norm(dim=-1, keepdim=False)}")
+        # print(f"HW: {weight_hyp.norm(dim=-1, keepdim=False)}")
 
         return logits
 
@@ -231,9 +231,9 @@ class HyperbolicQwen(Qwen3ForCausalLM):
                 ignore_index=-100
             )
 
-        print(f"labels: {labels}")
-        print(f"logits: {logits}")
-        print(f"loss: {loss}")
+        # print(f"labels: {labels}")
+        # print(f"logits: {logits}")
+        # print(f"loss: {loss}")
 
         return CausalLMOutputWithPast(
             loss=loss,
