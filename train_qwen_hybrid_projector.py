@@ -255,7 +255,7 @@ def main():
         dataloader_num_workers=4,
 
         # Multi-GPU: DDP is used automatically by torchrun
-        ddp_find_unused_parameters=False,  # all fwd params are used; avoids DDP overhead
+        ddp_find_unused_parameters=True,  # all fwd params are used; avoids DDP overhead
 
         # Logging
         logging_steps=10,
@@ -275,9 +275,6 @@ def main():
         args=training_args,
         train_dataset=tokenized_dataset,
         data_collator=data_collator,
-
-        # Working to resolve potential trainer issue
-        ddp_find_unused_parameters=True,
     )
 
     # ── Train (with optional resume) ──────────────────────────────────────────

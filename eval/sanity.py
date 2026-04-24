@@ -147,7 +147,7 @@ def main():
     model.eval()
 
     # prompt = "What is 7+8? Please answer succintly:"
-    prompt = "What color is the sky?"
+    prompt = "The sky is"
 
     response = generate_answer(model, tokenizer, prompt, max_new_tokens=args.max_new_tokens, device=args.device)
 
