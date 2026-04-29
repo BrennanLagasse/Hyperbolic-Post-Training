@@ -3,7 +3,7 @@
 #SBATCH --job-name=Qwen3-1.7B-Hybrid-Head-PT
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=32G
-#SBATCH --time=2:00:00
+#SBATCH --time=4:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --output=logs/slurm/o_%A.out
 #SBATCH --error=logs/slurm/o_%A.err
@@ -27,8 +27,9 @@ nvidia-smi
 
 # Train with two GPUs using pytorch elastic
 PYTHONPATH=. torchrun --nproc_per_node=2 train_qwen_hybrid_projector.py \
-    --model_name=./hyperbolic-qwen \
-    --max_samples=100000
+    --model_name=./hybrid_qwen \
+    --max_samples=200000 \
+    --output_dir=./runs/hyperbolic_head_v2
 
 # If there is an error, print out the error code
 echo $?

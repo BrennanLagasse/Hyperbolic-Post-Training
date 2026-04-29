@@ -9,6 +9,7 @@ Example:
 
 
 python ./eval/arc_eval.py --model ./runs/qwen3-openorca/final --sample 100
+python ./eval/arc_eval.py --model ./runs/hyperbolic_head/final --sample 10
 python ./eval/arc_eval.py --model Qwen/Qwen3-1.7B --sample 100
 """
 
@@ -23,7 +24,10 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 
-from eval_utiles import generate_answer
+from eval_utils import generate_answer
+
+# Registers model
+from models.hybrid_qwen import HyperbolicQwen
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +169,7 @@ def evaluate(
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a causal LM on ARC-Challenge.")
     parser.add_argument("--model",    type=str, required=True,  help="HuggingFace model name or local path")
+    parser.add_argument("--tokenizer",type=str, default=None,   help="Huggingface model name (if shared by model), defaults to model")
     parser.add_argument("--sample",   type=int, default=100,    help="Number of test questions to evaluate on")
     parser.add_argument("--fewshot",  type=int, default=5,      help="Number of few-shot examples per question")
     parser.add_argument("--device",   type=str, default="cuda", help="Device: 'cuda', 'cpu', or 'mps'")
@@ -181,7 +186,13 @@ def main():
     dtype_map = {"float16": torch.float16, "bfloat16": torch.bfloat16, "auto": "auto"}
     torch_dtype = dtype_map.get(args.dtype, "auto")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    if args.tokenizer is None:
+        tokenizer_path = args.model
+    else:
+        tokenizer_path = args.tokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
         torch_dtype=torch_dtype,

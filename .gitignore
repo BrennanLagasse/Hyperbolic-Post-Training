@@ -4,3 +4,4 @@
 
 # Too large
 /runs/
+*.safetensors
