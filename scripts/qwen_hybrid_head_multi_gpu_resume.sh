@@ -1,9 +1,9 @@
 #!/bin/bash
 
-#SBATCH --job-name=Qwen3-1.7B-SFT
-#SBATCH --cpus-per-task=2
+#SBATCH --job-name=Qwen3-1.7B-Hybrid-Head-PT
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=32G
-#SBATCH --time=0:30:00
+#SBATCH --time=4:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --output=logs/slurm/o_%A.out
 #SBATCH --error=logs/slurm/o_%A.err
@@ -20,15 +20,16 @@ date
 hostname
 pwd
 
-# torch==2.9.0+cu129
 source ../hyperbolic_rag/vllm_rag_env/bin/activate
 ml load CUDA/12.1.1
-# ml load GCC/10.2.0
 
 nvidia-smi
 
 # Train with two GPUs using pytorch elastic
-torchrun --nproc_per_node=2 train_qwen_sft.py
+PYTHONPATH=. torchrun --nproc_per_node=2 train_qwen_hybrid_projector.py \
+    --model_name=./runs/hyperbolic_head/checkpoint-2100 \
+    --max_samples=100000 \
+    --resume_from_checkpoint
 
 # If there is an error, print out the error code
 echo $?

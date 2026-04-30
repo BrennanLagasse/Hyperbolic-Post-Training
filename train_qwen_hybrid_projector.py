@@ -29,6 +29,10 @@ Usage:
 """
 
 import os
+
+# Prevent issues with parallelism
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
@@ -251,6 +255,11 @@ def main():
 
     # ── Training arguments ────────────────────────────────────────────────────
     training_args = TrainingArguments(
+
+        # Increase learning rate since prelim results very slow
+        learning_rate=2e-4,
+        warmup_steps=0,
+
         output_dir=args.output_dir,
         num_train_epochs=3,
 
@@ -264,7 +273,7 @@ def main():
         dataloader_num_workers=4,
 
         # Multi-GPU: DDP is used automatically by torchrun
-        ddp_find_unused_parameters=True,  # all fwd params are used; avoids DDP overhead
+        ddp_find_unused_parameters=False,  
 
         # Logging
         logging_steps=10,
@@ -290,6 +299,7 @@ def main():
     resume = args.resume_from_checkpoint
     if resume and resume.lower() == "true":
         resume = True
+        print("\n\nResuming from previous")
 
     logger.info("\n\nStarting training…")
     trainer.train(resume_from_checkpoint=resume)

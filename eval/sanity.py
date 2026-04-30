@@ -12,6 +12,7 @@ from typing import Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+# Registers model
 from models.hybrid_qwen import HyperbolicQwen
 
 
@@ -122,6 +123,8 @@ def parse_args():
     parser.add_argument("--verbose",  action="store_true",      help="Print per-example predictions")
     parser.add_argument("--dtype",    type=str, default="auto", help="Model dtype: 'auto', 'float16', 'bfloat16'")
     parser.add_argument("--max_new_tokens", type=int, default=64, help="Number of tokens to generate")
+    parser.add_argument("--prompt", type=str, default="The sky is", help="Model prompt")
+
     return parser.parse_args()
 
 
@@ -147,7 +150,7 @@ def main():
     model.eval()
 
     # prompt = "What is 7+8? Please answer succintly:"
-    prompt = "The sky is"
+    prompt = args.prompt
 
     response = generate_answer(model, tokenizer, prompt, max_new_tokens=args.max_new_tokens, device=args.device)
 

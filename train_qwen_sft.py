@@ -1,5 +1,5 @@
 """
-Supervised Fine-Tuning: Qwen3-1.7B on OpenOrca
+Supervised Fine-Tuning: Qwen3-1.7B (Base/Hybrid) on OpenOrca
 ================================================
 Features:
   - Hugging Face Trainer + TRL SFTTrainer
