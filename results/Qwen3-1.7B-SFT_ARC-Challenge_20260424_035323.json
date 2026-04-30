@@ -1,0 +1,10 @@
+{
+  "model": "./runs/qwen3-openorca/final",
+  "dataset": "allenai/ai2_arc",
+  "timestamp": "20260424_035323",
+  "metrics": {
+    "correct": 745,
+    "parse_failure": 5,
+    "total_samples": 1000
+  }
+}
